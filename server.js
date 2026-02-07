@@ -71,17 +71,22 @@ app.post("/voice", async (req, res) => {
   try {
     const { text } = req.body;
 
+    if (!text) {
+      return res.json({ reply: "No text received." });
+    }
+
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-native-audio-dialog:generateContent?key=" +
+      "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-native-audio-preview-12-2025:generateContent?key=" +
         GEMINI_API_KEY,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: SYSTEM_PROMPT }]
-          },
           contents: [
+            {
+              role: "system",
+              parts: [{ text: SYSTEM_PROMPT }]
+            },
             {
               role: "user",
               parts: [{ text }]
@@ -99,7 +104,7 @@ app.post("/voice", async (req, res) => {
 
     res.json({ reply });
   } catch (err) {
-    console.error(err);
+    console.error("VOICE ERROR:", err);
     res.status(500).json({ reply: "Server error" });
   }
 });
