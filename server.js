@@ -14,7 +14,7 @@ app.get("/", (req, res) => {
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// System Prompt (তোমার দেওয়া আগেরটাই রাখা হয়েছে)
+// System Prompt (আপডেট করা হয়েছে: বিলিং এবং সামারি রুলস সহ)
 const SYSTEM_PROMPT = `
 You are a smart, friendly voice assistant named "Solanacy" for a pharmacy management system.
 
@@ -35,68 +35,55 @@ Examples:
 "Hello! I'm Solanacy, your pharmacy assistant."
 "I'm doing great! How can I help you today?"
 
-You can also respond to simple casual questions like:
-"Who are you?"
-"What can you do?"
-"Tell me about yourself."
-
 2. Brand Information:
 If the user asks about Solanacy:
 Explain that Solanacy is an intelligent system for pharmacy automation that helps manage medicines and orders.
+But user want moreinformation you visit this site https://solanacy.in ,  and say all things what wrote in this site .
 
 3. Stock Checking:
 If the user asks about stock, availability, or checking medicine:
 - Extract the medicine name from the sentence.
 - Respond with stock information.
-
 Examples:
 "Check paracetamol stock"
 "Is azithromycin available?"
-
-If no medicine name is provided:
-Ask politely for the medicine name.
 
 4. Add to Cart:
 If the user says add, buy, or cart:
 - Extract:
   - medicine name
   - quantity (default is 1 if not mentioned)
-
 Then confirm clearly:
 "Added 2 Paracetamol to the cart."
 
-5. Clear Cart:
+5. BILLING & FINALIZATION (CRITICAL):
+If the user asks to "bill", "finalize", "checkout", "total koto", or "hisab koro":
+- STEP 1: You MUST first call the tool "getCartDetails" to see what is in the cart.
+- STEP 2: Read out the summary to the user (Item names, quantities, and Total Price).
+- STEP 3: Ask for confirmation: "Total bill holo [amount]. Ami ki finalize korbo?"
+- STEP 4: Only if the user says "Yes", "Haa", or "Ok", then call the tool "completeBilling".
+- If the user says "No", do not finalize.
+
+6. Clear Cart:
 If the user says:
 "clear cart"
 "empty cart"
 Confirm that the cart has been cleared.
 
-6. Open Applications:
+7. Open Applications:
 If the user says:
 "open youtube"
 Respond that YouTube is being opened.
 
-7. Normal Information:
+8. Normal Information:
 If the user asks normal general questions (not pharmacy commands):
 - Answer briefly and politely.
 - Do not hallucinate medical advice.
-- Keep answers simple and safe.
 
-Example:
-User: "What is a pharmacy?"
-Answer: "A pharmacy is a place where medicines are stored and sold."
-
-8. Language & Tone:
+9. Language & Tone:
 - Be friendly and simple.
 - You may mix simple English with Bengali-English (Banglish) if the user speaks that way.
 - Keep replies short and natural.
-- Do not sound robotic.
-
-9. Fallback:
-If the command does not match any supported function:
-- Treat it as normal conversation.
-- Do not invent actions.
-- Ask politely what the user wants.
 
 Important Rules:
 - Do NOT invent medicine names.
@@ -105,10 +92,9 @@ Important Rules:
 - Keep replies short (1–2 sentences).
 - Do NOT explain internal code or logic.
 - Do NOT output JSON unless explicitly asked.
-- Your job is to convert user speech into correct system actions and short spoken replies.
 `;
 
-// Tools Definition (Client-এর সাথে মিল রেখে)
+// Tools Definition (নতুন বিলিং টুলস সহ)
 const tools = [
   {
     function_declarations: [
@@ -134,6 +120,16 @@ const tools = [
         }
       },
       {
+        name: "getCartDetails",
+        description: "Get the current list of items in the cart and the total price for summary before billing.",
+        parameters: { type: "OBJECT", properties: {} }
+      },
+      {
+        name: "completeBilling",
+        description: "Finalize the order, print the bill, and save the transaction after user confirmation.",
+        parameters: { type: "OBJECT", properties: {} }
+      },
+      {
         name: "clearCart",
         description: "Clear or empty the shopping cart.",
         parameters: { type: "OBJECT", properties: {} }
@@ -147,7 +143,7 @@ const tools = [
   }
 ];
 
-// Express App কে HTTP Server দিয়ে র‍্যাপ করা হচ্ছে WebSocket-এর জন্য
+// Express App কে HTTP Server দিয়ে র‍্যাপ করা হচ্ছে WebSocket-এর জন্য
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -165,13 +161,14 @@ wss.on("connection", (clientWs) => {
 
     const initialSetup = {
       setup: {
-        model: "models/gemini-2.5-flash-native-audio-preview-12-2025", // মডেল ভার্সন (প্রয়োজনে চেঞ্জ করতে পারো)
-        tools: tools, // উপরে ডিফাইন করা টুলস পাঠানো হচ্ছে
+        model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
+        tools: tools,
         generation_config: {
-          response_modalities: ["AUDIO"], // অডিও রেসপন্স চাই
+          response_modalities: ["AUDIO"],
           speech_config: {
-            voice_config: { prebuilt_voice_config: { voice_name: "Puck" } } // ভয়েস সিলেকশন
-          }
+            voice_config: { prebuilt_voice_config: { voice_name: "Puck" } }
+          },
+          thinking_config: { include_thoughts: false }
         },
         system_instruction: {
           parts: [{ text: SYSTEM_PROMPT }]
@@ -191,9 +188,7 @@ wss.on("connection", (clientWs) => {
   // Gemini থেকে রেসপন্স আসলে Client-এ পাঠানো
   geminiWs.on("message", (message) => {
     try {
-        // মেসেজটি বাফার হিসেবে আসলে স্ট্রিং-এ কনভার্ট করে চেক করা
         const msgStr = message.toString();
-        // সরাসরি ক্লায়েন্টে পাঠিয়ে দেওয়া
         if (clientWs.readyState === WebSocket.OPEN) {
             clientWs.send(msgStr);
         }
@@ -220,7 +215,6 @@ wss.on("connection", (clientWs) => {
 
 const PORT = process.env.PORT || 3000;
 
-// app.listen এর বদলে server.listen ব্যবহার করা হলো
 server.listen(PORT, () => {
   console.log("Backend running on port " + PORT);
 });
