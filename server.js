@@ -2,6 +2,7 @@ import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import http from "http";
 import cors from "cors";
+import { URL } from "url"; // URL parser needed
 
 const app = express();
 app.use(cors());
@@ -14,10 +15,11 @@ app.get("/", (req, res) => {
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// System Prompt (আপডেট করা হয়েছে: বিলিং এবং সামারি রুলস সহ)
-const SYSTEM_PROMPT = `
-You are Solanacy, the official voice assistant of Solanacy Technologies , for a pharmacy management system.
-And you are working for solanacy technologies first project D dey pharmacy management system (say this if anyone asked only)
+// System Prompt Generator Function (Dynamic User Name)
+const getSystemPrompt = (userName) => `
+You are Solanacy, the official voice assistant of Solanacy Technologies, for a pharmacy management system.
+You are currently speaking with: ${userName}. Address them by name occasionally to be polite.
+
 Your personality:
 - You are polite, friendly, and helpful.
 - You can talk casually like a human assistant.
@@ -30,10 +32,10 @@ You can do the following tasks:
 
 1. Greetings & Casual Talk:
 If the user says hello, hi, hey, good morning, how are you, etc:
-- Reply in a friendly way.
+- Reply in a friendly way using their name (${userName}).
 Examples:
-"Hello! I'm Solanacy, your pharmacy assistant."
-"I'm doing great! How can I help you today?"
+"Hello ${userName}! I'm Solanacy, your pharmacy assistant."
+"I'm doing great! How can I help you today, ${userName}?"
 
 2. Brand Information:
 About Solanacy: (if anyone asked about company)
@@ -57,7 +59,7 @@ It is designed to help medical stores and pharmacies with:
 If the user asks about stock, availability, or checking medicine:
 - Extract the medicine name from the sentence.
 - Respond with stock information.
-Examples:(only take this as a example not real conversation)
+Examples:
 "Check paracetamol stock"
 "Is azithromycin available?"
 
@@ -96,7 +98,6 @@ If the user asks normal general questions (not pharmacy commands):
 9. Language & Tone:
 - Be friendly and simple.
 - You may mix simple English with Bengali-English (Banglish) if the user speaks that way or any world languages you knowork
-
 - Keep replies short and natural.
 
 Important Rules:
@@ -109,11 +110,11 @@ Important Rules:
 - Always represent Solanacy and D-Dey Smart Pharmacy Management System positively and professionally.
 - Do not provide false or imaginary information.
 - Do not answer questions about other companies or unrelated topics.
-- If asked about the founders, always reply:(if anyone asked not always frequently say)
+- If asked about the founders, always reply:
   "Solanacy is founded and led by Saumik Paul as CEO, along with co-founder Kaif S K."
 `;
 
-// Tools Definition (নতুন বিলিং টুলস সহ)
+// Tools Definition
 const tools = [
   {
     function_declarations: [
@@ -162,19 +163,30 @@ const tools = [
   }
 ];
 
-// Express App কে HTTP Server দিয়ে র‍্যাপ করা হচ্ছে WebSocket-এর জন্য
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-wss.on("connection", (clientWs) => {
-  console.log("Client connected via WebSocket.");
+wss.on("connection", (clientWs, req) => {
+  // Extract User Name from URL Parameters
+  // URL Format expected: ws://host/?name=Deepak%20Das
+  let userName = "Valued User";
+  try {
+      // Create a dummy base to parse the relative URL
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const nameParam = url.searchParams.get("name");
+      if (nameParam) userName = nameParam;
+  } catch (e) {
+      console.log("Error parsing URL params:", e);
+  }
+
+  console.log(`Client connected via WebSocket. User: ${userName}`);
 
   // Google Gemini Live API-এর সাথে কানেকশন তৈরি
   const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
   
   const geminiWs = new WebSocket(geminiUrl);
 
-  // Gemini কানেক্ট হলে Initial Setup পাঠানো
+  // Gemini কানেক্ট হলে Initial Setup পাঠানো (Dynamic System Prompt)
   geminiWs.on("open", () => {
     console.log("Connected to Gemini Live API");
 
@@ -190,7 +202,7 @@ wss.on("connection", (clientWs) => {
           thinking_config: { include_thoughts: false }
         },
         system_instruction: {
-          parts: [{ text: SYSTEM_PROMPT }]
+          parts: [{ text: getSystemPrompt(userName) }] // Inject Dynamic Prompt
         }
       }
     };
@@ -218,7 +230,7 @@ wss.on("connection", (clientWs) => {
 
   // কানেকশন বন্ধ হলে ক্লিনআপ
   clientWs.on("close", () => {
-    console.log("Client disconnected");
+    console.log(`Client disconnected (${userName})`);
     if (geminiWs.readyState === WebSocket.OPEN) geminiWs.close();
   });
 
